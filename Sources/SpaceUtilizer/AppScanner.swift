@@ -108,22 +108,104 @@ class AppScanner: ObservableObject {
 
     // MARK: - Discovery
 
+    /// Finds every app on this Mac that the user can see in Spotlight:
+    ///  • /Applications and ~/Applications, including sub-folders (Utilities, "Chrome Apps", …)
+    ///  • apps that ship inside other apps (FileMerge, Simulator… inside Xcode)
+    ///  • apps elsewhere in your home folder (e.g. a project's built .app)
+    /// System apps (/System/Applications) and helper apps hidden inside frameworks are skipped.
     private func findAllAppURLs() -> [URL] {
-        let dirs = [
-            URL(fileURLWithPath: "/Applications"),
-            URL(fileURLWithPath: NSHomeDirectory() + "/Applications"),
-        ]
         var found: [URL] = []
         var seen = Set<String>()
-        for dir in dirs {
-            guard let items = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { continue }
-            for item in items where item.pathExtension == "app" {
-                let key = item.resolvingSymlinksInPath().path
-                guard seen.insert(key).inserted else { continue }
-                found.append(item)
+        func add(_ url: URL) {
+            let key = url.resolvingSymlinksInPath().standardizedFileURL.path
+            guard Self.isUserVisibleApp(key), seen.insert(key).inserted else { return }
+            found.append(url)
+        }
+
+        // 1. Walk the Applications folders (a few levels deep, into plain folders only)
+        let roots = [URL(fileURLWithPath: "/Applications"),
+                     URL(fileURLWithPath: NSHomeDirectory() + "/Applications")]
+        for root in roots { walk(root, depth: 0, maxDepth: 3, add: add) }
+
+        // 2. Spotlight — the same index macOS search uses
+        for path in spotlightAppPaths() { add(URL(fileURLWithPath: path)) }
+
+        return found
+    }
+
+    /// Recursively collects .app bundles; also looks inside each app for bundled apps
+    /// (Contents/Applications, Contents/Developer/Applications).
+    private func walk(_ dir: URL, depth: Int, maxDepth: Int, add: (URL) -> Void) {
+        guard depth <= maxDepth,
+              let items = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+                                                      options: [.skipsHiddenFiles]) else { return }
+        for item in items {
+            if item.pathExtension == "app" {
+                add(item)
+                for sub in ["Contents/Applications", "Contents/Developer/Applications"] {
+                    let inner = item.appendingPathComponent(sub)
+                    if let nested = try? fm.contentsOfDirectory(at: inner, includingPropertiesForKeys: nil,
+                                                                 options: [.skipsHiddenFiles]) {
+                        for n in nested where n.pathExtension == "app" { add(n) }
+                    }
+                }
+                continue
+            }
+            let values = try? item.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            if values?.isDirectory == true && values?.isSymbolicLink != true {
+                walk(item, depth: depth + 1, maxDepth: maxDepth, add: add)
             }
         }
-        return found
+    }
+
+    /// Asks Spotlight for every application bundle. Returns [] if Spotlight is off or slow.
+    private func spotlightAppPaths() -> [String] {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/mdfind")
+        task.arguments = ["-0", "kMDItemContentType == 'com.apple.application-bundle'"]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = FileHandle.nullDevice
+        do { try task.run() } catch { return [] }
+        // We're already on a background queue; read everything first so a full pipe can't block.
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        task.waitUntilExit()
+        return data.split(separator: 0).compactMap { String(data: Data($0), encoding: .utf8) }
+    }
+
+    /// Filters out system apps, helper apps buried in frameworks, build intermediates,
+    /// the Trash, mounted disk images and app-translocation copies.
+    static func isUserVisibleApp(_ path: String) -> Bool {
+        let home = NSHomeDirectory()
+        guard path.hasSuffix(".app") else { return false }
+        let inApplications = path.hasPrefix("/Applications/") || path.hasPrefix(home + "/Applications/")
+        let inHome = path.hasPrefix(home + "/")
+        guard inApplications || inHome else { return false }       // skips /System, /Library, /Volumes, /private…
+        let skipped = ["/.Trash/", "/Library/", "/.build/", "/DerivedData/", "/node_modules/",
+                       "/Caches/", "/.cache/", "/site-packages/", "/.git/", "/Pods/", "/Carthage/"]
+        if inHome && !inApplications {
+            for part in skipped where path.contains(part) { return false }
+        }
+        // An .app inside another .app is shown only when it's a real bundled tool
+        // (Xcode › FileMerge), never a helper like "Chrome Helper.app".
+        let comps = path.components(separatedBy: "/")
+        let appComps = comps.enumerated().filter { $0.element.hasSuffix(".app") }
+        if appComps.count > 1 {
+            guard appComps.count == 2 else { return false }
+            let between = comps[(appComps[0].offset + 1)..<appComps[1].offset].joined(separator: "/")
+            return between == "Contents/Applications" || between == "Contents/Developer/Applications"
+        }
+        return true
+    }
+
+    /// The app this one is bundled inside (FileMerge → Xcode), if any.
+    static func containingApp(of url: URL) -> URL? {
+        var dir = url.deletingLastPathComponent()
+        while dir.path.count > 1 {
+            if dir.pathExtension == "app" { return dir }
+            dir = dir.deletingLastPathComponent()
+        }
+        return nil
     }
 
     // MARK: - Build AppInfo
@@ -142,7 +224,8 @@ class AppScanner: ObservableObject {
             .filter { !assocPaths.contains($0.path.standardizedFileURL.path) }
         return AppInfo(name: name, path: url, bundleID: bundleID, appSize: appSize,
                        lastUsed: lastUsed, version: version, icon: icon,
-                       associatedFiles: associated, dataFolders: dataFolders)
+                       associatedFiles: associated, dataFolders: dataFolders,
+                       containingApp: Self.containingApp(of: url))
     }
 
     // MARK: - Known Data Paths

@@ -336,7 +336,24 @@ struct AppDetailView: View {
 
     // MARK: - Delete
 
+    @ViewBuilder
     private var deleteSection: some View {
+        if let parent = app.containingAppName {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Remove")
+                    .font(.headline)
+                Label("\(app.name) is part of \(parent), so it can't be removed on its own. Its size is included in \(parent). To free this space, remove \(parent).",
+                      systemImage: "shippingbox")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } else {
+            removableDeleteSection
+        }
+    }
+
+    private var removableDeleteSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Remove")
                 .font(.headline)

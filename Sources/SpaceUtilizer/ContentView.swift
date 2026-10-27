@@ -446,7 +446,14 @@ struct AppRowView: View {
                         .font(.caption)
                         .foregroundStyle(sizeColor(app.totalSize))
 
-                    if !app.associatedFiles.isEmpty {
+                    if let parent = app.containingAppName {
+                        Text("·")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                        Text("in \(parent)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else if !app.associatedFiles.isEmpty {
                         Text("·")
                             .font(.caption)
                             .foregroundStyle(.tertiary)

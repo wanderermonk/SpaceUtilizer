@@ -9,7 +9,7 @@ set -euo pipefail
 
 APP_NAME="SpaceUtilizer"
 BUNDLE_ID="com.fighter.SpaceUtilizer"
-VERSION="1.2.0"
+VERSION="1.3.0"
 BUILD_NUMBER="$(date +%Y%m%d%H%M)"
 MIN_MACOS="13.0"
 

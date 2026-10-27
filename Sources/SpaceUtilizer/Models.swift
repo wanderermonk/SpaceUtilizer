@@ -15,10 +15,15 @@ final class AppInfo: ObservableObject, Identifiable, Hashable {
     let icon: NSImage?
     @Published var associatedFiles: [AssociatedFile]
     @Published var dataFolders: [DataFolder]
+    /// Set when this app ships inside another app (e.g. FileMerge inside Xcode).
+    /// Such apps can't be removed on their own.
+    let containingApp: URL?
 
     init(name: String, path: URL, bundleID: String?, appSize: Int64,
          lastUsed: Date?, version: String?, icon: NSImage?,
-         associatedFiles: [AssociatedFile], dataFolders: [DataFolder] = []) {
+         associatedFiles: [AssociatedFile], dataFolders: [DataFolder] = [],
+         containingApp: URL? = nil) {
+        self.containingApp = containingApp
         self.name = name
         self.path = path
         self.bundleID = bundleID
@@ -36,10 +41,17 @@ final class AppInfo: ObservableObject, Identifiable, Hashable {
         return appSize + extras.reduce(0) { $0 + max($1.size, 0) }
     }
 
+    /// Name of the app this one is bundled inside, if any.
+    var containingAppName: String? { containingApp?.deletingPathExtension().lastPathComponent }
+
     var installLocation: String {
-        if path.path.hasPrefix(NSHomeDirectory() + "/Applications") { return "~/Applications" }
-        if path.path.hasPrefix("/Applications") { return "/Applications" }
-        return path.deletingLastPathComponent().path
+        if let parent = containingAppName { return "Inside \(parent)" }
+        let home = NSHomeDirectory()
+        let dir = path.deletingLastPathComponent().path
+        if dir == home + "/Applications" { return "~/Applications" }
+        if dir == "/Applications" { return "/Applications" }
+        if dir.hasPrefix(home + "/") { return "~/" + dir.dropFirst(home.count + 1) }
+        return dir
     }
 
     static func == (lhs: AppInfo, rhs: AppInfo) -> Bool { lhs.id == rhs.id }

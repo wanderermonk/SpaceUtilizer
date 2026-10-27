@@ -5,7 +5,10 @@ completely, including the models, caches and data it keeps outside the `.app` bu
 
 ## Features
 - Disk overview for Macintosh HD.
-- Scans `/Applications` and `~/Applications`, sorted by total footprint.
+- Finds every app Spotlight can find, sorted by total footprint: `/Applications` and `~/Applications`
+  (including sub-folders like Utilities), apps bundled inside other apps (e.g. FileMerge and Simulator
+  inside Xcode, shown as "in Xcode" and protected from removal on their own), and apps elsewhere in
+  your home folder such as a project's built `.app`. System apps and helper apps are skipped.
 - For every app it finds:
   - **Library files:** Preferences, Caches, Application Support, Logs, Containers, Group Containers,
     HTTPStorages/WebKit, Saved State and Launch Agents.
