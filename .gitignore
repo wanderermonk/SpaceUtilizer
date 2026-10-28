@@ -39,3 +39,5 @@ Thumbs.db
 
 # App build output
 dist/
+# macOS metadata on external drives
+._*
